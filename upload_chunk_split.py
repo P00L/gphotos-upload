@@ -209,6 +209,13 @@ def resume_photo(session, upload_url):
     return response
 
 
+def write_fail(photo_file, row):
+    logging.error(f'failed load {photo_file}')
+    with open("fail.csv", "a+", newline='') as error_file:
+        error_file_writer = csv.writer(error_file, delimiter=',', quotechar='"', quoting=csv.QUOTE_MINIMAL)
+        error_file_writer.writerow(row)
+
+
 def upload_photos():
     session = get_authorized_session('token.json')
     albums = retrieve_album(session)
@@ -231,9 +238,15 @@ def upload_photos():
                 photo_bytes = photo_file.read()
             except OSError as err:
                 logging.error("Could not read file \'{0}\' -- {1}".format(photo_file_name, err))
+                write_fail(photo_file, row)
                 continue
 
-            upload_token_resume = start_upload(session, photo_file_name, photo_file_name_upd, photo_file_dimension)
+            try:
+                upload_token_resume = start_upload(session, photo_file_name, photo_file_name_upd, photo_file_dimension)
+            except OSError as err:
+                logging.error("Something went wrong with start \'{0}\' -- {1}".format(photo_file_name, err))
+                write_fail(photo_file, row)
+                continue
 
             if upload_token_resume.status_code == 200:
                 upload_url = upload_token_resume.headers['X-Goog-Upload-URL']
@@ -248,11 +261,6 @@ def upload_photos():
                 while not exit_condition:
                     tentativo += 1
                     if tentativo == 100:
-                        logging.error(f'failed load {photo_file}')
-                        with open("fail.csv", "a+", newline='') as error_file:
-                            error_file_writer = csv.writer(error_file, delimiter=',', quotechar='"',
-                                                           quoting=csv.QUOTE_MINIMAL)
-                            error_file_writer.writerow(row)
                         exit_condition = True
 
                     try:
@@ -269,14 +277,11 @@ def upload_photos():
                         resume_offset = resume_photo(session, upload_url)
 
             else:
-                logging.error(f'failed load {photo_file}')
-                with open("fail.csv", "a+", newline='') as error_file:
-                    error_file_writer = csv.writer(error_file, delimiter=',', quotechar='"', quoting=csv.QUOTE_MINIMAL)
-                    error_file_writer.writerow(row)
+                write_fail(photo_file, row)
                 continue
 
             if upload_token is None:
-                logging.error(f'upload_token None {photo_file}')
+                write_fail(photo_file, row)
                 continue
 
             if (upload_token.status_code == 200) and (upload_token.content):
@@ -310,9 +315,7 @@ def upload_photos():
                 logging.error(
                     "Could not upload \'{0}\'. Server Response - {1}".format(os.path.basename(photo_file_name),
                                                                              upload_token))
-                with open("fail.csv", "a+", newline='') as error_file:
-                    error_file_writer = csv.writer(error_file, delimiter=',', quotechar='"', quoting=csv.QUOTE_MINIMAL)
-                    error_file_writer.writerow(row)
+                write_fail(photo_file, row)
 
 
 def main():
