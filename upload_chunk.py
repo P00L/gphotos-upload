@@ -144,32 +144,34 @@ def create_or_retrieve_album(session, album_title):
 
 
 @retry(stop_max_attempt_number=5)
-def start_upload(session, photo_file_name, photo_file_name_upd):
-    session.headers["Content-type"] = "application/octet-stream"
+def start_upload(session, photo_file_name, photo_file_name_upd, photo_file_dimension):
+    session.headers["Content-Length"] = "0"
+    session.headers["X-Goog-Upload-Command"] = "start"
+    session.headers["X-Goog-Upload-Content-Type"] = "image/x-dcraw"  # TODO
     session.headers["X-Goog-Upload-Protocol"] = "resumable"
     session.headers["X-Goog-Upload-File-Name"] = photo_file_name_upd
-    session.headers["X-Goog-Upload-Command"] = "start"
-    session.headers["X-Goog-Upload-Raw-Size"] = str(os.stat(photo_file_name).st_size)
+    session.headers["X-Goog-Upload-Raw-Size"] = photo_file_dimension
 
-    logging.info("start uploading photo -- \'{}\'".format(photo_file_name))
+    logging.info("start uploading photo {} -- \'{}\'".format(photo_file_dimension, photo_file_name))
 
     response = session.post('https://photoslibrary.googleapis.com/v1/uploads')
 
-    del (session.headers["Content-type"])
+    del (session.headers["Content-Length"])
+    del (session.headers["X-Goog-Upload-Command"])
+    del (session.headers["X-Goog-Upload-Content-Type"])
     del (session.headers["X-Goog-Upload-Protocol"])
     del (session.headers["X-Goog-Upload-File-Name"])
-    del (session.headers["X-Goog-Upload-Command"])
     del (session.headers["X-Goog-Upload-Raw-Size"])
 
     return response
 
 
 def upload_photo(session, upload_url, photo_bytes, photo_file_name, offset):
-    session.headers["Content-Length"] = str(os.stat(photo_file_name).st_size)
+    session.headers["Content-Length"] = len(photo_bytes)
     session.headers["X-Goog-Upload-Command"] = "upload, finalize"
     session.headers["X-Goog-Upload-Offset"] = str(offset)
 
-    logging.info("uploading photo {} -- \'{}\'".format(offset, photo_file_name))
+    logging.info("uploading photo {}/{} -- \'{}\'".format(offset, len(photo_bytes), photo_file_name))
     response = session.post(upload_url, photo_bytes)
 
     del (session.headers["Content-Length"])
@@ -206,6 +208,7 @@ def upload_photos():
             album_name = row[0]
             photo_file_name = row[1]
             photo_file_name_upd = str(uuid.uuid4())
+            photo_file_dimension = str(os.stat(photo_file_name).st_size)
             description = row[2]
             if album_name not in albums:
                 raise ValueError('cannot find album {}'.format(album_name))
@@ -218,7 +221,7 @@ def upload_photos():
                 logging.error("Could not read file \'{0}\' -- {1}".format(photo_file_name, err))
                 continue
 
-            upload_token_resume = start_upload(session, photo_file_name, photo_file_name_upd)
+            upload_token_resume = start_upload(session, photo_file_name, photo_file_name_upd, photo_file_dimension)
 
             if upload_token_resume.status_code == 200:
                 upload_url = upload_token_resume.headers['X-Goog-Upload-URL']
@@ -231,9 +234,12 @@ def upload_photos():
                 while not exit_condition:
                     tentativo += 1
                     if tentativo == 10:
-                        tentativo = 0
-                        logging.info('refreshing session')
-                        session = get_authorized_session('token.json')
+                        logging.error(f'failed load {photo_file}')
+                        with open("fail.csv", "a+", newline='') as error_file:
+                            error_file_writer = csv.writer(error_file, delimiter=',', quotechar='"',
+                                                           quoting=csv.QUOTE_MINIMAL)
+                            error_file_writer.writerow(row)
+                        exit_condition = True
                     try:
                         upload_token = upload_photo(session, upload_url, photo_bytes, photo_file_name, resume_offset)
                         if upload_token.status_code != 200:
@@ -250,44 +256,47 @@ def upload_photos():
                     error_file_writer.writerow(row)
                 continue
 
-        if (upload_token.status_code == 200) and (upload_token.content):
+            if (upload_token.status_code == 200) and (upload_token.content):
 
-            create_body = json.dumps({"albumId": album_id, "newMediaItems": [
-                {"description": description, "simpleMediaItem": {"uploadToken": upload_token.content.decode()}}]},
-                                     indent=4)
+                create_body = json.dumps({"albumId": album_id, "newMediaItems": [
+                    {"description": description, "simpleMediaItem": {"uploadToken": upload_token.content.decode()}}]},
+                                         indent=4)
 
-            resp = session.post('https://photoslibrary.googleapis.com/v1/mediaItems:batchCreate',
-                                create_body).json()
+                resp = session.post('https://photoslibrary.googleapis.com/v1/mediaItems:batchCreate',
+                                    create_body).json()
 
-            logging.debug("Server response: {}".format(resp))
+                logging.debug("Server response: {}".format(resp))
 
-            if "newMediaItemResults" in resp:
-                status = resp["newMediaItemResults"][0]["status"]
-                if status.get("code") and (status.get("code") > 0):
-                    logging.error(
-                        "Could not add \'{0}\' to library -- {1}".format(os.path.basename(photo_file_name),
-                                                                         status["message"]))
+                if "newMediaItemResults" in resp:
+                    status = resp["newMediaItemResults"][0]["status"]
+                    if status.get("code") and (status.get("code") > 0):
+                        logging.error(
+                            "Could not add \'{0}\' to library -- {1}".format(os.path.basename(photo_file_name),
+                                                                             status["message"]))
+                    else:
+                        logging.info(
+                            "Added \'{}\' to library and album \'{}\' ".format(os.path.basename(photo_file_name),
+                                                                               album_name))
                 else:
-                    logging.info(
-                        "Added \'{}\' to library and album \'{}\' ".format(os.path.basename(photo_file_name),
-                                                                           album_name))
+                    logging.error(
+                        "Could not add \'{0}\' to library. Server Response -- {1}".format(
+                            os.path.basename(photo_file_name),
+                            resp))
+
             else:
                 logging.error(
-                    "Could not add \'{0}\' to library. Server Response -- {1}".format(
-                        os.path.basename(photo_file_name),
-                        resp))
+                    "Could not upload \'{0}\'. Server Response - {1}".format(os.path.basename(photo_file_name),
+                                                                             upload_token))
+                with open("fail.csv", "a+", newline='') as error_file:
+                    error_file_writer = csv.writer(error_file, delimiter=',', quotechar='"', quoting=csv.QUOTE_MINIMAL)
+                    error_file_writer.writerow(row)
 
-        else:
-            logging.error(
-                "Could not upload \'{0}\'. Server Response - {1}".format(os.path.basename(photo_file_name),
-                                                                         upload_token))
-
-    try:
-        del (session.headers["Content-type"])
-        del (session.headers["X-Goog-Upload-Protocol"])
-        del (session.headers["X-Goog-Upload-File-Name"])
-    except KeyError:
-        pass
+            try:
+                del (session.headers["Content-type"])
+                del (session.headers["X-Goog-Upload-Protocol"])
+                del (session.headers["X-Goog-Upload-File-Name"])
+            except KeyError:
+                pass
 
 
 def main():
