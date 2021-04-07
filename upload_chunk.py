@@ -204,7 +204,6 @@ def upload_photos():
         csv_reader = csv.reader(csv_file, delimiter=',')
 
         for row in csv_reader:
-            # time.sleep(randint(0, 5))
             album_name = row[0]
             photo_file_name = row[1]
             photo_file_name_upd = str(uuid.uuid4())
@@ -230,6 +229,7 @@ def upload_photos():
                 exit_condition = False
                 resume_offset = 0
                 tentativo = 0
+                upload_token = None
 
                 while not exit_condition:
                     tentativo += 1
@@ -255,6 +255,9 @@ def upload_photos():
                     error_file_writer = csv.writer(error_file, delimiter=',', quotechar='"', quoting=csv.QUOTE_MINIMAL)
                     error_file_writer.writerow(row)
                 continue
+
+            if upload_token is None:
+                logging.error(f'upload_token None {photo_file}')
 
             if (upload_token.status_code == 200) and (upload_token.content):
 
@@ -290,13 +293,6 @@ def upload_photos():
                 with open("fail.csv", "a+", newline='') as error_file:
                     error_file_writer = csv.writer(error_file, delimiter=',', quotechar='"', quoting=csv.QUOTE_MINIMAL)
                     error_file_writer.writerow(row)
-
-            try:
-                del (session.headers["Content-type"])
-                del (session.headers["X-Goog-Upload-Protocol"])
-                del (session.headers["X-Goog-Upload-File-Name"])
-            except KeyError:
-                pass
 
 
 def main():
