@@ -147,7 +147,7 @@ def create_or_retrieve_album(session, album_title):
 def start_upload(session, photo_file_name, photo_file_name_upd, photo_file_dimension):
     session.headers["Content-Length"] = "0"
     session.headers["X-Goog-Upload-Command"] = "start"
-    session.headers["X-Goog-Upload-Content-Type"] = "image/x-dcraw"  # TODO
+    session.headers["X-Goog-Upload-Content-Type"] = "image/jpeg"
     session.headers["X-Goog-Upload-Protocol"] = "resumable"
     session.headers["X-Goog-Upload-File-Name"] = photo_file_name_upd
     session.headers["X-Goog-Upload-Raw-Size"] = photo_file_dimension
@@ -219,7 +219,7 @@ def write_fail(photo_file, row):
 def upload_photos():
     session = get_authorized_session('token.json')
     albums = retrieve_album(session)
-    with open('CR2.csv') as csv_file:
+    with open('CR3.csv') as csv_file:
 
         csv_reader = csv.reader(csv_file, delimiter=',')
 
@@ -321,7 +321,7 @@ def upload_photos():
 def main():
     logging.basicConfig(format='%(asctime)s %(module)s.%(funcName)s:%(levelname)s:%(message)s',
                         datefmt='%m/%d/%Y %I_%M_%S %p',
-                        filename='log_12.log',
+                        filename='log_15.log',
                         level=logging.INFO)
 
     session = get_authorized_session('token.json')

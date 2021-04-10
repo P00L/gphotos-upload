@@ -10,6 +10,7 @@ import uuid
 import time
 from random import randint
 from retrying import retry
+import sys
 
 
 def parse_args(arg_input=None):
@@ -150,7 +151,7 @@ def real_upload_photo(session, photo_bytes, photo_file_name):
 
 def upload_photos(session):
     albums = retrieve_album(session)
-    with open('upload.csv') as csv_file:
+    with open('CR3.csv') as csv_file:
 
         csv_reader = csv.reader(csv_file, delimiter=',')
 
@@ -160,7 +161,7 @@ def upload_photos(session):
             photo_file_name = row[1]
             description = row[2]
             if album_name not in albums:
-                raise ValueError('cannot find album '.format(album_name))
+                raise ValueError('cannot find album {}'.format(album_name))
             album_id = albums[album_name]
 
             session.headers["Content-type"] = "application/octet-stream"
@@ -175,8 +176,15 @@ def upload_photos(session):
 
             session.headers["X-Goog-Upload-File-Name"] = str(uuid.uuid4())
 
-            upload_token = real_upload_photo(session, photo_bytes, photo_file)
+            try:
+                upload_token = real_upload_photo(session, photo_bytes, photo_file)
+            except:
+                logging.error(f'failed load {photo_file}')
+                with open("fail.csv", "a+", newline='') as error_file:
+                    error_file_writer = csv.writer(error_file, delimiter=',', quotechar='"', quoting=csv.QUOTE_MINIMAL)
+                    error_file_writer.writerow(row)
 
+                continue
             if (upload_token.status_code == 200) and (upload_token.content):
 
                 create_body = json.dumps({"albumId": album_id, "newMediaItems": [
@@ -220,8 +228,9 @@ def upload_photos(session):
 def main():
     logging.basicConfig(format='%(asctime)s %(module)s.%(funcName)s:%(levelname)s:%(message)s',
                         datefmt='%m/%d/%Y %I_%M_%S %p',
-                        filename='log.log',
+                        filename='logs/log_11.log',
                         level=logging.INFO)
+    # logging.getLogger().addHandler(logging.StreamHandler(sys.stdout))
 
     session = get_authorized_session('token.json')
 
